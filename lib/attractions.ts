@@ -21,7 +21,7 @@ export async function searchAttractions(params: { city: string }): Promise<Attra
       { aliases: ["travelers"], value: 1 },
       { aliases: ["searchQuery", "search_query", "query", "q", "keyword", "text", "search", "location", "city", "place", "name"], value: isSkeleton ? undefined : `things to do in ${params.city}` },
       { aliases: ["category", "type"], value: "attractions" },
-      { aliases: ["language", "lang"], value: "en" },
+      { aliases: ["language", "lang", "hl"], value: "en" },
       { aliases: ["limit", "max_results", "maxResults", "results", "count"], value: 20 },
     ]);
     const raw = await callTool(tool.name, args);

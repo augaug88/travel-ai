@@ -1,4 +1,4 @@
-import { getMcpClient, resetMcpClient, errorMessage } from "./mcp.js";
+import { getMcpClient, listTools, resetMcpClient, errorMessage } from "./mcp.js";
 
 export class ToolError extends Error {
   constructor(
@@ -62,14 +62,37 @@ export async function callTool(name: string, args: Record<string, unknown>): Pro
       try {
         return await attempt();
       } catch (err2) {
-        throw toToolError(name, err2);
+        throw await toToolError(name, err2);
       }
     }
-    throw toToolError(name, err);
+    throw await toToolError(name, err);
   }
 }
 
-function toToolError(name: string, err: unknown): ToolError {
+/**
+ * When a call fails, ask the toolbox (read-only status tool) whether that
+ * tool's server is actually connected, so the UI can say "authorise it in
+ * Smithery" instead of a bare "Connection closed". Best effort only.
+ * The status payload's setup URL is never included (it carries a token).
+ */
+async function serverStateHint(toolName: string): Promise<string> {
+  try {
+    const tools = await listTools();
+    const status = tools.find((t) => t.name === "get_toolbox_status" || t.name.endsWith("_get_toolbox_status") || t.name.endsWith(".get_toolbox_status"));
+    if (!status) return "";
+    const sep = Math.min(...[toolName.indexOf("."), toolName.indexOf("_")].filter((i) => i >= 0));
+    const server = Number.isFinite(sep) ? toolName.slice(0, sep) : toolName;
+    const client = await getMcpClient();
+    const result = parseResult(status.name, await client.callTool({ name: status.name, arguments: {} })) as { servers?: { server?: string; state?: string }[] } | null;
+    const entry = result?.servers?.find((s) => s.server === server);
+    if (!entry || !entry.state || entry.state === "connected") return "";
+    return ` (Smithery reports server "${server}" is in state "${entry.state}": open the toolbox on Smithery and complete its setup)`;
+  } catch {
+    return "";
+  }
+}
+
+async function toToolError(name: string, err: unknown): Promise<ToolError> {
   if (err instanceof ToolError) return err;
-  return new ToolError(name, errorMessage(err));
+  return new ToolError(name, errorMessage(err) + (await serverStateHint(name)));
 }
