@@ -17,6 +17,7 @@ import fx from "./api/fx.js";
 import hotels from "./api/hotels.js";
 import weatherAbroad from "./api/weather/abroad.js";
 import weatherSg from "./api/weather/sg.js";
+import mcp from "./api/mcp.js";
 
 const routes: Record<string, ApiHandler> = {
   "/api/flights": flights,
@@ -33,6 +34,14 @@ const routes: Record<string, ApiHandler> = {
 async function main(): Promise<void> {
   const app = express();
   app.use(express.json({ limit: "256kb" }));
+
+  // MCP server: same handler Vercel runs from api/mcp.ts.
+  app.post("/api/mcp", (req: Request, res: Response) => {
+    void mcp(req, res);
+  });
+  app.get("/api/mcp", (req: Request, res: Response) => {
+    void mcp(req, res);
+  });
 
   for (const [route, handler] of Object.entries(routes)) {
     app.all(route, (req: Request, res: Response) => {
