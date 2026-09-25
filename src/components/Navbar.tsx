@@ -9,6 +9,7 @@ import {
   Compass,
   MessageSquare,
   MapPin,
+  Sparkles,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -20,6 +21,7 @@ const NAV_ITEMS = [
   { path: '/weather', label: 'Weather', icon: CloudSun },
   { path: '/explore', label: 'Explore', icon: Compass },
   { path: '/chat', label: 'Chat', icon: MessageSquare, badge: 'AI' },
+  { path: '/sorted', label: 'Sorted', icon: Sparkles, badge: 'New' },
 ];
 
 export function Navbar() {
@@ -126,7 +128,7 @@ export function Navbar() {
           })}
         </nav>
         <div className="border-t border-slate-100">
-          <nav className="grid grid-cols-4 gap-1 p-1">
+          <nav className="grid grid-cols-5 gap-1 p-1">
             {NAV_ITEMS.slice(4).map((item) => {
               const Icon = item.icon;
               return (

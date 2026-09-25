@@ -12,6 +12,11 @@ import weatherSgHandler from './api/weather/sg';
 import weatherAbroadHandler from './api/weather/abroad';
 import attractionsHandler from './api/attractions';
 import chatHandler from './api/chat';
+import sortedResolveHandler from './api/sorted/resolve';
+import sortedRecommendHandler from './api/sorted/recommend';
+import sortedDestinationHandler from './api/sorted/destination';
+import sortedVisaHandler from './api/sorted/visa';
+import mcpHandler from './api/mcp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,6 +27,10 @@ async function startServer() {
 
   app.use(express.json());
 
+  // This app's own MCP server (same handler Vercel runs from api/mcp.js)
+  app.post('/api/mcp', mcpHandler);
+  app.get('/api/mcp', mcpHandler);
+
   // Mount API route handlers directly from api/ (never copies code)
   app.get('/api/flights', flightsHandler);
   app.get('/api/hotels', hotelsHandler);
@@ -31,6 +40,10 @@ async function startServer() {
   app.get('/api/weather/abroad', weatherAbroadHandler);
   app.get('/api/attractions', attractionsHandler);
   app.post('/api/chat', chatHandler);
+  app.get('/api/sorted/resolve', sortedResolveHandler);
+  app.get('/api/sorted/recommend', sortedRecommendHandler);
+  app.get('/api/sorted/destination', sortedDestinationHandler);
+  app.get('/api/sorted/visa', sortedVisaHandler);
 
   // Health check endpoint
   app.get('/api/health', (_req, res) => {

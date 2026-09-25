@@ -1,1 +1,14 @@
 @import "tailwindcss";
+
+/* Kanso palette for the Sorted Travel screens */
+@theme {
+  --color-kanso-bg: #f7f6f2;
+  --color-kanso-card: #efeeea;
+  --color-kanso-line: #e4e2dc;
+  --color-kanso-ink: #0e0e0e;
+  --color-kanso-muted: #6b6b66;
+  --color-kanso-accent: #b5452c;
+  --color-kanso-accent-soft: #fbdcd3;
+  --color-kanso-green: #2f6b3c;
+  --color-kanso-green-soft: #d8ecdb;
+}
