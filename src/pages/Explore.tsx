@@ -44,6 +44,44 @@ export default function ExplorePage() {
             {dest.data.brief_updated && <div className="muted">Brief updated {dest.data.brief_updated}</div>}
             {dest.data.place_url && <a href={dest.data.place_url} target="_blank" rel="noreferrer">Full page</a>}
           </div>
+          {dest.data.events && (
+            <>
+              <h3>Events</h3>
+              <SourceLine source={dest.data.events.source} fetchedAt={dest.data.fetched_at} />
+              {dest.data.events.items.length === 0 ? (
+                <Empty>No events returned for this city.</Empty>
+              ) : (
+                <ul className="cards">
+                  {dest.data.events.items.map((ev, i) => (
+                    <li key={i} className="card">
+                      <strong>{ev.name ?? "Event"}</strong>
+                      <div className="muted">{[ev.date, ev.category].filter(Boolean).join(" · ")}</div>
+                      {ev.description && <div className="muted">{ev.description}</div>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <RawView data={dest.data.events.raw} label="Events (raw)" />
+            </>
+          )}
+          {dest.data.local_tips && (
+            <>
+              <h3>Local tips</h3>
+              <SourceLine source={dest.data.local_tips.source} fetchedAt={dest.data.fetched_at} />
+              {dest.data.local_tips.items.length === 0 ? (
+                <RawView data={dest.data.local_tips.raw} label="Local tips" />
+              ) : (
+                <ul className="cards">
+                  {dest.data.local_tips.items.map((t, i) => (
+                    <li key={i} className="card">
+                      <strong>{t.name ?? t.category ?? "Tip"}</strong>
+                      {t.description && <div className="muted">{t.description}</div>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
           <RawView data={dest.data.raw} />
         </>
       )}

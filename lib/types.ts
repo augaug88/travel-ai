@@ -122,6 +122,17 @@ export interface DestinationResponse extends Sourced {
   brief_updated?: string;
   taxi_apps?: string[];
   place_url?: string;
+  /** Optional extras when the toolbox has them (Pulse). */
+  events?: { source: string; items: NamedItem[]; raw: unknown } | null;
+  local_tips?: { source: string; items: NamedItem[]; raw: unknown } | null;
+}
+
+export interface NamedItem {
+  name?: string;
+  description?: string;
+  date?: string;
+  category?: string;
+  raw: unknown;
 }
 
 export interface Attraction {

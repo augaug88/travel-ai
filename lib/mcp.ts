@@ -74,9 +74,26 @@ function toolPart(name: string): string {
   return us >= 0 ? name.slice(us + 1) : name;
 }
 
-export function isDeniedTool(name: string): boolean {
-  return DENIED_EXACT.has(name) || DENIED_EXACT.has(toolPart(name)) || DENIED_PATTERN.test(name);
+interface Annotated {
+  name: string;
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
 }
+
+/**
+ * Toolbox management tools are always denied. Otherwise a tool whose server
+ * declares it read-only (readOnlyHint) is allowed; anything else with a
+ * write-style verb in its name is denied.
+ */
+export function isDeniedTool(tool: string | Annotated): boolean {
+  const name = typeof tool === "string" ? tool : tool.name;
+  if (DENIED_EXACT.has(name) || DENIED_EXACT.has(toolPart(name))) return true;
+  const ann = typeof tool === "string" ? undefined : tool.annotations;
+  if (ann?.readOnlyHint === true && ann.destructiveHint !== true) return false;
+  return DENIED_PATTERN.test(name);
+}
+
+/** Names denied by policy in the current tool list (filled on connect). */
+let deniedNames = new Set<string>();
 
 /** Wrap a Client so listTools() hides denied tools and callTool() refuses them. */
 function readOnly(client: Client): Client {
@@ -85,13 +102,16 @@ function readOnly(client: Client): Client {
       if (prop === "listTools") {
         return async (...args: Parameters<Client["listTools"]>) => {
           const res = await target.listTools(...args);
-          return { ...res, tools: res.tools.filter((t) => !isDeniedTool(t.name)) };
+          deniedNames = new Set(res.tools.filter((t) => isDeniedTool(t)).map((t) => t.name));
+          return { ...res, tools: res.tools.filter((t) => !deniedNames.has(t.name)) };
         };
       }
       if (prop === "callTool") {
         return (...args: Parameters<Client["callTool"]>) => {
           const name = args[0]?.name ?? "";
-          if (isDeniedTool(name)) return Promise.reject(new Error(`tool "${name}" is blocked: this app is read-only`));
+          if (deniedNames.has(name) || DENIED_EXACT.has(name) || DENIED_EXACT.has(toolPart(name))) {
+            return Promise.reject(new Error(`tool "${name}" is blocked: this app is read-only`));
+          }
           return target.callTool(...args);
         };
       }
@@ -121,8 +141,9 @@ async function connect(): Promise<Client> {
 
   await raw.connect(transport);
   const { tools: all } = await raw.listTools();
-  const tools = all.filter((t) => !isDeniedTool(t.name));
-  const blocked = all.filter((t) => isDeniedTool(t.name)).map((t) => t.name);
+  deniedNames = new Set(all.filter((t) => isDeniedTool(t)).map((t) => t.name));
+  const tools = all.filter((t) => !deniedNames.has(t.name));
+  const blocked = Array.from(deniedNames);
   toolCache = tools;
   console.log(`[mcp] connected; discovered ${tools.length} usable tools: ${tools.map((t) => t.name).join(", ")}`);
   if (blocked.length) console.log(`[mcp] blocked (read-only guardrail): ${blocked.join(", ")}`);

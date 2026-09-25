@@ -153,6 +153,16 @@ export const CAP = {
       { source: "isdaniel/mcp_weather_server", test: (n, d) => has(n, "forecast", "temperature") && has(d, "city") && !has(d, "singapore") },
     ],
   },
+  events: {
+    key: "events",
+    label: "city events (Pulse)",
+    candidates: [{ source: "onetrip/pulse", test: (n) => n.includes("pulse") && endsWith(n, "get_events") }],
+  },
+  localTips: {
+    key: "local_tips",
+    label: "local tips (Pulse)",
+    candidates: [{ source: "onetrip/pulse", test: (n) => n.includes("pulse") && endsWith(n, "get_local_tips") }],
+  },
   attractions: {
     key: "attractions",
     label: "attractions / things to do",
@@ -160,6 +170,7 @@ export const CAP = {
       { source: "tripadvisor/search", test: (n, d) => has(n + " " + d, "tripadvisor") && has(n, "search") },
       { source: "tripadvisor/search", test: (n, d) => has(n, "attraction", "things_to_do", "things-to-do") || (n.includes("search") && has(d, "attraction", "things to do")) },
       { source: "hithereiamaliff/mcp-grabmaps", test: (n, d) => has(n + " " + d, "grab") && has(n, "search", "place") },
+      { source: "onetrip/pulse", test: (n) => n.includes("pulse") && endsWith(n, "create_trip_skeleton") },
       { source: "cyanheads/openstreetmap-mcp-server", test: (n, d) => has(n + " " + d, "openstreetmap", "osm", "nominatim") && has(n, "search", "geocode", "place") },
     ],
   },

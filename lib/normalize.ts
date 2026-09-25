@@ -88,6 +88,21 @@ export function pickPrice(obj: unknown): { amount?: number; currency?: string } 
   return { amount, currency };
 }
 
+/** Gather every array of records stored under `key` anywhere in a payload. */
+export function collectUnderKey(payload: unknown, key: string, depth = 0): Record<string, unknown>[] {
+  if (depth > 7 || payload === null || typeof payload !== "object") return [];
+  const out: Record<string, unknown>[] = [];
+  if (Array.isArray(payload)) {
+    for (const p of payload) out.push(...collectUnderKey(p, key, depth + 1));
+    return out;
+  }
+  for (const [k, v] of Object.entries(payload as Record<string, unknown>)) {
+    if (norm(k) === norm(key) && Array.isArray(v)) out.push(...v.filter(isObj));
+    else out.push(...collectUnderKey(v, key, depth + 1));
+  }
+  return out;
+}
+
 /** Collect all strings nested in a value (for text search). */
 export function flattenText(v: unknown, depth = 0): string {
   if (typeof v === "string") return v;

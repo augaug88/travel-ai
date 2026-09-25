@@ -1,9 +1,9 @@
 import { buildArgs } from "./args.js";
-import { CAP, resolveTool } from "./capabilities.js";
+import { CAP, resolveTool, tryResolveTool, type ResolvedTool } from "./capabilities.js";
 import { asUpstream, BadRequestError, nowIso } from "./errors.js";
 import { findList, pick, pickNumber, pickString } from "./normalize.js";
 import { callTool } from "./tools.js";
-import type { DestinationResponse } from "./types.js";
+import type { DestinationResponse, NamedItem } from "./types.js";
 
 export interface ResolvedDestination {
   handle: string;
@@ -37,6 +37,31 @@ export async function resolveDestinationHandle(city: string): Promise<ResolvedDe
   }
 }
 
+function namedItems(raw: unknown): NamedItem[] {
+  const list = findList(raw);
+  return list.slice(0, 30).map((it) => ({
+    name: pickString(it, ["name", "title", "tip", "event", "heading"]),
+    description: pickString(it, ["description", "text", "details", "summary", "content", "note"]),
+    date: pickString(it, ["date", "dates", "when", "month", "start_date"]),
+    category: pickString(it, ["category", "type", "kind"]),
+    raw: it,
+  }));
+}
+
+/** Call an optional Pulse-style city tool; never required, never faked. */
+async function optionalCityTool(tool: ResolvedTool | null, city: string): Promise<DestinationResponse["events"]> {
+  if (!tool) return null;
+  try {
+    const raw = await callTool(tool.name, buildArgs(tool, [
+      { aliases: ["city", "destination", "query", "location"], value: city },
+      { aliases: ["category"], value: "all" },
+    ]));
+    return { source: tool.source, items: namedItems(raw), raw };
+  } catch {
+    return null;
+  }
+}
+
 export async function destinationInfo(params: { city: string }): Promise<DestinationResponse> {
   if (!params.city.trim()) throw new BadRequestError("city is required");
   const resolved = await resolveDestinationHandle(params.city);
@@ -46,6 +71,8 @@ export async function destinationInfo(params: { city: string }): Promise<Destina
     const raw = await callTool(tool.name, args);
     const brief = pick(raw, ["brief"]);
     const taxi = pick(raw, ["taxi_apps"]);
+    const [eventsTool, tipsTool] = await Promise.all([tryResolveTool(CAP.events), tryResolveTool(CAP.localTips)]);
+    const [events, local_tips] = await Promise.all([optionalCityTool(eventsTool, params.city), optionalCityTool(tipsTool, params.city)]);
     return {
       city: params.city,
       handle: resolved.handle,
@@ -60,6 +87,8 @@ export async function destinationInfo(params: { city: string }): Promise<Destina
       brief_updated: pickString(brief, ["update_date"]),
       taxi_apps: Array.isArray(taxi) ? taxi.map((t) => pickString(t, ["name"]) ?? "").filter(Boolean) : undefined,
       place_url: pickString(raw, ["place_url"]),
+      events,
+      local_tips,
       source: tool.source,
       fetched_at: nowIso(),
       raw,
