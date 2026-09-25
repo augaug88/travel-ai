@@ -57,7 +57,7 @@ async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? 3000);
   app.listen(port, () => {
     console.log(`SG Trip Planner listening on http://localhost:${port}`);
-    console.log(`env: GEMINI_API_KEY ${process.env.GEMINI_API_KEY ? "set" : "MISSING"}, SMITHERY_MCP_URL ${process.env.SMITHERY_MCP_URL ? "set" : "MISSING"}`);
+    console.log(`env: GEMINI_API_KEY ${process.env.GEMINI_API_KEY ? "set" : "MISSING"}, SMITHERY_MCP_URL ${process.env.SMITHERY_MCP_URL ? "set" : "MISSING"}, SMITHERY_API_KEY ${process.env.SMITHERY_API_KEY ? "set" : "not set (using api_key from URL)"}`);
   });
 }
 

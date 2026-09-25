@@ -20,7 +20,9 @@ npm run dev            # http://localhost:3000
 ## Deploy on Vercel
 
 Import the GitHub repo in Vercel (framework preset: Vite). Set two environment
-variables in the project settings: `GEMINI_API_KEY` and `SMITHERY_MCP_URL`.
+variables in the project settings: `GEMINI_API_KEY`, `SMITHERY_MCP_URL` and
+`SMITHERY_API_KEY` (the key is sent as a Bearer header; the URL may also carry it
+as `?api_key=`).
 `vercel.json` raises the API function timeout to 60 s for MCP and Gemini calls
 and rewrites non-API paths to the SPA.
 

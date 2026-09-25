@@ -19,9 +19,22 @@ function toolboxUrl(): URL {
   return new URL(raw);
 }
 
+/**
+ * Smithery expects the key as an Authorization header. Take it from
+ * SMITHERY_API_KEY, or fall back to the api_key query parameter in the URL.
+ */
+function toolboxApiKey(url: URL): string | undefined {
+  const fromEnv = process.env.SMITHERY_API_KEY?.trim();
+  if (fromEnv) return fromEnv;
+  const fromUrl = url.searchParams.get("api_key")?.trim();
+  return fromUrl || undefined;
+}
+
 /** Remove anything that could identify a key or the toolbox URL from a message. */
 export function sanitize(message: string): string {
   let out = message;
+  const apiKey = process.env.SMITHERY_API_KEY;
+  if (apiKey) out = out.split(apiKey).join("[redacted]");
   const smithery = process.env.SMITHERY_MCP_URL;
   if (smithery) {
     out = out.split(smithery).join("[SMITHERY_MCP_URL]");
@@ -36,6 +49,7 @@ export function sanitize(message: string): string {
   if (gemini) out = out.split(gemini).join("[redacted]");
   out = out.replace(/api_key=[^&\s"']+/gi, "api_key=[redacted]");
   out = out.replace(/key=[A-Za-z0-9_-]{16,}/g, "key=[redacted]");
+  out = out.replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer [redacted]");
   return out;
 }
 
@@ -84,7 +98,11 @@ async function connect(): Promise<Client> {
   const url = toolboxUrl();
   const raw = new Client({ name: "sg-trip-planner", version: "0.1.0" });
   const client = readOnly(raw);
-  const transport = new StreamableHTTPClientTransport(url);
+  const apiKey = toolboxApiKey(url);
+  if (!apiKey) throw new Error("no toolbox key: set SMITHERY_API_KEY or include api_key in SMITHERY_MCP_URL");
+  const transport = new StreamableHTTPClientTransport(url, {
+    requestInit: { headers: { Authorization: `Bearer ${apiKey}` } },
+  });
 
   raw.onerror = (err) => {
     console.error(`[mcp] transport error: ${errorMessage(err)}`);

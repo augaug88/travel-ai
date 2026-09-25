@@ -51,8 +51,8 @@ export function createHandler(method: "GET" | "POST", run: (req: ApiRequest) => 
         res.status(502).json({ error: err.message, source: "toolbox", missing_capability: err.capability });
         return;
       }
-      const source = err instanceof UpstreamError ? err.source : "unknown";
       const message = errorMessage(err);
+      const source = err instanceof UpstreamError ? err.source : /^MCP connect failed/.test(message) ? "smithery-toolbox" : "unknown";
       console.error(`[api] upstream failure (${source}): ${message}`);
       res.status(502).json({ error: message, source });
     }
