@@ -64,11 +64,18 @@ export function errorMessage(err: unknown): string {
  * listed to Gemini or called by a route.
  */
 const DENIED_EXACT = new Set(["execute", "remove_server"]);
-const DENIED_PATTERN = /(^|[_-])(remove|delete|update|create|book|pay|purchase|send|cancel|write|post)([_-]|$)/i;
+const DENIED_PATTERN = /(^|[._-])(remove|delete|update|create|book|pay|purchase|send|cancel|write|post)([._-]|$)/i;
+
+/** Tool part of "<server>.<tool>" or "<server>_<tool>". */
+function toolPart(name: string): string {
+  const dot = name.indexOf(".");
+  if (dot >= 0) return name.slice(dot + 1);
+  const us = name.indexOf("_");
+  return us >= 0 ? name.slice(us + 1) : name;
+}
 
 export function isDeniedTool(name: string): boolean {
-  const short = name.split("_").slice(-1)[0] ?? name;
-  return DENIED_EXACT.has(name) || DENIED_EXACT.has(short) || DENIED_PATTERN.test(name);
+  return DENIED_EXACT.has(name) || DENIED_EXACT.has(toolPart(name)) || DENIED_PATTERN.test(name);
 }
 
 /** Wrap a Client so listTools() hides denied tools and callTool() refuses them. */

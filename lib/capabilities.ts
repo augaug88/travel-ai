@@ -38,9 +38,18 @@ export class MissingCapabilityError extends Error {
 }
 
 const has = (s: string, ...needles: string[]) => needles.some((n) => s.includes(n));
-/** Toolbox tools are named "<owner>-<server>_<tool>"; match on the tool part. */
-const tail = (n: string) => n.split("_").slice(1).join("_") || n;
-const endsWith = (n: string, ...tools: string[]) => tools.some((t) => n === t || n.endsWith(`_${t}`) || tail(n) === t);
+/**
+ * Toolbox tools are named "<owner>-<server>.<tool>" (dot) or
+ * "<owner>-<server>_<tool>" (underscore) depending on the client. Server ids
+ * use hyphens, so the first "." or "_" separates server from tool.
+ */
+export const toolPart = (n: string): string => {
+  const dot = n.indexOf(".");
+  if (dot >= 0) return n.slice(dot + 1);
+  const us = n.indexOf("_");
+  return us >= 0 ? n.slice(us + 1) : n;
+};
+const endsWith = (n: string, ...tools: string[]) => tools.some((t) => n === t || toolPart(n) === t);
 
 export const CAP = {
   flights: {
@@ -86,7 +95,7 @@ export const CAP = {
       { source: "stockvibes07/exchange-mcp", test: (n) => n.includes("exchange-mcp") && endsWith(n, "convert") },
       { source: "stockvibes07/exchange-mcp", test: (n) => n.includes("exchange-mcp") && endsWith(n, "get_rate") },
       { source: "stockvibes07/exchange-mcp", test: (n) => has(n, "exchange", "convert", "currency") && !has(n, "xrocket", "crypto") },
-      { source: "stockvibes07/exchange-mcp", test: (n, d) => n.includes("rate") && d.includes("currenc") },
+      { source: "stockvibes07/exchange-mcp", test: (n, d) => n.includes("rate") && d.includes("currenc") && !has(n + " " + d, "xrocket", "crypto", "ton ") },
     ],
   },
   sgWeather2h: {
