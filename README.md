@@ -17,6 +17,20 @@ npm install
 npm run dev            # http://localhost:3000
 ```
 
+## MCP endpoint
+
+`POST /api/mcp` publishes the data routes as an MCP server (Streamable HTTP,
+JSON responses, no sessions) for agents using Gemini's `mcpToTool`. Tools are
+prefixed `sgtrip_`: search_flights, search_hotels, changi_leave_by,
+convert_currency, sg_weather, destination_weather, attractions, destination_info.
+Any other method returns 405 with a JSON-RPC error body.
+
+```sh
+curl -s http://localhost:3000/api/mcp -H 'content-type: application/json' \
+  -H 'accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
 ## Deploy on Vercel
 
 Import the GitHub repo in Vercel (framework preset: Vite). Set two environment

@@ -7,8 +7,9 @@ import { buildMcpServer } from "../lib/mcpServer.js";
  * Vercel runs this file at /api/mcp; server.ts mounts the same handler for
  * the preview. A fresh server and transport are built for every POST.
  */
-type Req = IncomingMessage & { method?: string; body?: unknown };
-type Res = ServerResponse & { status?: (code: number) => Res; json?: (body: unknown) => unknown };
+/** Minimal shapes satisfied by Vercel's and Express's request/response objects. */
+type Req = { method?: string; body?: unknown };
+type Res = { statusCode: number; setHeader(name: string, value: string): unknown; end(body?: string): unknown; on(event: "close", cb: () => void): unknown };
 
 const METHOD_NOT_ALLOWED = { jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed" }, id: null };
 
@@ -27,5 +28,5 @@ export default async function handler(req: Req, res: Res): Promise<void> {
     server.close().catch(() => undefined);
   });
   await server.connect(transport);
-  await transport.handleRequest(req, res, req.body);
+  await transport.handleRequest(req as unknown as IncomingMessage, res as unknown as ServerResponse, req.body);
 }
