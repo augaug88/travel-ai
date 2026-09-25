@@ -94,10 +94,12 @@ export const CAP = {
     key: "fx",
     label: "currency exchange rates",
     candidates: [
+      { source: "tal-no70/fx-converter-mcp", test: (n) => n.includes("fx-converter") && endsWith(n, "convert_currency") },
+      { source: "tal-no70/fx-converter-mcp", test: (n) => n.includes("fx-converter") && endsWith(n, "get_exchange_rate") },
       { source: "stockvibes07/exchange-mcp", test: (n) => n.includes("exchange-mcp") && endsWith(n, "convert") },
       { source: "stockvibes07/exchange-mcp", test: (n) => n.includes("exchange-mcp") && endsWith(n, "get_rate") },
-      { source: "stockvibes07/exchange-mcp", test: (n) => has(n, "exchange", "convert", "currency") && !has(n, "xrocket", "crypto") },
-      { source: "stockvibes07/exchange-mcp", test: (n, d) => n.includes("rate") && d.includes("currenc") && !has(n + " " + d, "xrocket", "crypto", "ton ") },
+      { source: "currency-exchange", test: (n) => has(n, "exchange", "convert", "currency") && !has(n, "xrocket", "crypto") },
+      { source: "currency-exchange", test: (n, d) => n.includes("rate") && d.includes("currenc") && !has(n + " " + d, "xrocket", "crypto", "ton ") },
     ],
   },
   sgWeather2h: {
