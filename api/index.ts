@@ -1,10 +1,17 @@
-import express, { Request, Response } from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import { GoogleGenAI } from '@google/genai';
-import { MCP_TOOLS_REGISTRY, MCP_TOOLS_METADATA } from '../mcp/plantrip-server.js';
+import {
+  MCP_TOOLS_REGISTRY,
+  MCP_TOOLS_METADATA,
+  MCP_PATH,
+  SERVER_INFO,
+  DATA_NOTICE,
+  mcpHandler
+} from '../mcp/mcp-server.js';
 
 export const apiRouter = express.Router();
 
-apiRouter.use(express.json());
+apiRouter.use(express.json({ limit: '1mb' }));
 
 // Chatbot AI Concierge endpoint: queries MCP tools and formats answers
 apiRouter.post('/chat', async (req: Request, res: Response) => {
@@ -190,138 +197,42 @@ Write a relaxing, warm, concise response (2-3 short paragraphs max).
 });
 
 
-// Status check (Never exposes any API key or secret token)
-apiRouter.get('/status', (_req: Request, res: Response) => {
+// Status check (never exposes any API key or secret token)
+function statusHandler(_req: Request, res: Response) {
   res.json({
     status: 'online',
-    server: 'plantrip-mcp-server',
-    version: '1.0.0',
+    server: SERVER_INFO.name,
+    title: SERVER_INFO.title,
+    version: SERVER_INFO.version,
+    mcpPath: MCP_PATH,
     toolsCount: MCP_TOOLS_METADATA.length,
     hasPlantripKey: Boolean(process.env.PLANTRIP_API_KEY),
-    protocol: 'model-context-protocol/1.0',
-    uptime: process.uptime()
+    hasGeminiKey: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'),
+    dataNotice: DATA_NOTICE
   });
-});
+}
+apiRouter.get('/status', statusHandler);
+apiRouter.get('/health', statusHandler);
 
-// List all 14 MCP tools
-apiRouter.get('/mcp/tools', (_req: Request, res: Response) => {
-  res.json({
-    tools: MCP_TOOLS_METADATA
-  });
-});
+// Real MCP server over Streamable HTTP (stateless). Clients connect to /api/mcp.
+apiRouter.all('/mcp', (req: Request, res: Response) => mcpHandler(req, res));
 
-// Call any MCP tool by name
-apiRouter.post('/mcp/call', async (req: Request, res: Response) => {
-  try {
-    const { tool, arguments: toolArgs = {} } = req.body;
-    if (!tool || typeof tool !== 'string') {
-      return res.status(400).json({ error: 'Tool name is required' });
-    }
-
-    const handler = MCP_TOOLS_REGISTRY[tool];
-    if (!handler) {
-      return res.status(404).json({ error: `Tool "${tool}" not found in MCP registry` });
-    }
-
-    const result = await handler(toolArgs);
-    return res.json({
-      success: true,
-      tool,
-      result
-    });
-  } catch (error: any) {
-    return res.status(500).json({
-      success: false,
-      error: error?.message || 'Tool execution failed'
-    });
-  }
-});
-
-// Model Context Protocol JSON-RPC 2.0 handler (for MCP HTTP/SSE clients)
-apiRouter.post('/mcp/rpc', async (req: Request, res: Response) => {
-  const { jsonrpc = '2.0', id = 1, method, params = {} } = req.body;
-
-  if (method === 'initialize') {
-    return res.json({
-      jsonrpc: '2.0',
-      id,
-      result: {
-        protocolVersion: '2024-11-05',
-        capabilities: { tools: {} },
-        serverInfo: { name: 'plantrip-mcp-server', version: '1.0.0' }
-      }
-    });
-  }
-
-  if (method === 'tools/list') {
-    return res.json({
-      jsonrpc: '2.0',
-      id,
-      result: {
-        tools: MCP_TOOLS_METADATA.map(t => ({
-          name: t.name,
-          description: t.description,
-          inputSchema: { type: 'object', properties: {} }
-        }))
-      }
-    });
-  }
-
-  if (method === 'tools/call') {
-    const { name, arguments: toolArgs = {} } = params;
-    const handler = MCP_TOOLS_REGISTRY[name];
-    if (!handler) {
-      return res.status(404).json({
-        jsonrpc: '2.0',
-        id,
-        error: { code: -32601, message: `Tool "${name}" not found` }
-      });
-    }
-
-    try {
-      const output = await handler(toolArgs);
-      return res.json({
-        jsonrpc: '2.0',
-        id,
-        result: {
-          content: [{ type: 'text', text: JSON.stringify(output, null, 2) }]
-        }
-      });
-    } catch (err: any) {
-      return res.status(500).json({
-        jsonrpc: '2.0',
-        id,
-        error: { code: -32603, message: err?.message || 'Internal tool error' }
-      });
-    }
-  }
-
-  return res.status(400).json({
+// Body errors come back as JSON-RPC errors, never as an HTML page
+apiRouter.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) return next(err);
+  const isParse = err?.type === 'entity.parse.failed';
+  res.status(400).json({
     jsonrpc: '2.0',
-    id,
-    error: { code: -32601, message: `Method "${method}" not implemented` }
+    error: {
+      code: isParse ? -32700 : -32600,
+      message: isParse ? 'Parse error: request body is not valid JSON.' : `Invalid request: ${err?.message || 'bad body'}`
+    },
+    id: null
   });
-});
-
-// Convenient direct endpoint: POST /api/tools/:name
-apiRouter.post('/tools/:name', async (req: Request, res: Response) => {
-  const toolName = req.params.name;
-  const handler = MCP_TOOLS_REGISTRY[toolName];
-  if (!handler) {
-    return res.status(404).json({ error: `Tool "${toolName}" not found` });
-  }
-
-  try {
-    const result = await handler(req.body);
-    return res.json({ success: true, tool: toolName, result });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err?.message || 'Failed' });
-  }
 });
 
 // Export default handler for Vercel Serverless Function entry (/api)
 const app = express();
-app.use(express.json());
 
 // Handle both with /api prefix and without /api prefix for Vercel proxy compatibility
 app.use('/api', apiRouter);
@@ -331,7 +242,7 @@ app.use('/', apiRouter);
 app.use((req: Request, res: Response) => {
   res.status(404).json({
     error: `API route not found: ${req.method} ${req.url}`,
-    availableEndpoints: ['/api/status', '/api/mcp/tools', '/api/mcp/call', '/api/mcp/rpc', '/api/tools/:name']
+    availableEndpoints: ['/api/status', '/api/health', '/api/chat', MCP_PATH]
   });
 });
 

@@ -12,7 +12,7 @@ import {
   Cpu
 } from 'lucide-react';
 import { McpToolMeta, ServerStatus } from '../types/travel.ts';
-import { McpClientService } from '../services/mcpClient.ts';
+import { callMcp, describeMcpError, listMcpTools, McpNotFoundError, useMcpStatus } from '../services/mcpClient.ts';
 
 interface McpInspectorModalProps {
   isOpen: boolean;
@@ -49,15 +49,24 @@ export const McpInspectorModal: React.FC<McpInspectorModalProps> = ({
   const [outputJson, setOutputJson] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
+  const [toolsError, setToolsError] = useState<string | null>(null);
+  const [lastLatency, setLastLatency] = useState<number | null>(null);
+  const mcp = useMcpStatus();
 
   useEffect(() => {
     if (isOpen) {
-      McpClientService.getTools().then((list) => {
-        setTools(list);
-        if (list.length > 0 && !selectedTool) {
-          setSelectedTool(list[0].name);
-        }
-      });
+      setToolsError(null);
+      listMcpTools()
+        .then(({ tools: list }) => {
+          setTools(list);
+          if (list.length > 0 && !list.some((t) => t.name === selectedTool)) {
+            setSelectedTool(list[0].name);
+          }
+        })
+        .catch((err) => {
+          setTools([]);
+          setToolsError(describeMcpError(err));
+        });
     }
   }, [isOpen]);
 
@@ -84,11 +93,13 @@ export const McpInspectorModal: React.FC<McpInspectorModalProps> = ({
         throw new Error('Arguments must be valid JSON');
       }
 
-      const res = await McpClientService.callTool(selectedTool, parsedArgs);
-      setOutputJson(JSON.stringify(res, null, 2));
+      const res = await callMcp(selectedTool, parsedArgs);
+      setLastLatency(res.latency);
+      setOutputJson(JSON.stringify(res.rawPayload, null, 2));
     } catch (err: any) {
-      setErrorMsg(err.message || 'Execution error');
-      setOutputJson(null);
+      setErrorMsg(describeMcpError(err));
+      // A "not found" reply is still a real server reply: show it
+      setOutputJson(err instanceof McpNotFoundError ? JSON.stringify(err.payload, null, 2) : null);
     } finally {
       setIsRunning(false);
     }
@@ -114,19 +125,21 @@ export const McpInspectorModal: React.FC<McpInspectorModalProps> = ({
               <div className="flex items-center gap-2">
                 <h3 className="font-bold text-sm text-white">Model Context Protocol (MCP) Inspector</h3>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-900/60 text-emerald-300 border border-emerald-700/60">
-                  plantrip-mcp-server v1.0
+                  {serverStatus ? `${serverStatus.server} v${serverStatus.version}` : 'plantrip-mcp-server'}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Direct JSON-RPC interface to test all 14 travel planning tools
+                Real MCP calls to /api/mcp (Streamable HTTP). Replies below come straight from the server; data is sample data.
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
             <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-              <span className="text-emerald-400 font-mono text-[11px]">14 Tools Registered</span>
+              <span className={`w-2 h-2 rounded-full ${mcp.state === 'online' ? 'bg-emerald-400' : mcp.state === 'offline' ? 'bg-rose-500' : 'bg-slate-500'}`} />
+              <span className="text-emerald-400 font-mono text-[11px]">
+                {tools.length} tools · {mcp.state} · {lastLatency !== null && mcp.state === 'online' ? `${lastLatency} ms` : '--'}
+              </span>
             </div>
             <button
               onClick={onClose}
@@ -142,8 +155,11 @@ export const McpInspectorModal: React.FC<McpInspectorModalProps> = ({
           {/* Left tools list */}
           <div className="w-full md:w-72 border-r border-slate-800 overflow-y-auto p-3 space-y-1 bg-slate-950/60 shrink-0">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-3 py-1 block">
-              Registered MCP Tools (14)
+              Registered MCP Tools ({tools.length})
             </span>
+            {toolsError && (
+              <p className="px-3 py-2 text-[11px] text-rose-300">{toolsError}</p>
+            )}
             {tools.map((t) => {
               const isSelected = selectedTool === t.name;
               return (
@@ -220,7 +236,7 @@ export const McpInspectorModal: React.FC<McpInspectorModalProps> = ({
             {/* Result output */}
             <div className="flex-1 flex flex-col space-y-1.5">
               <div className="flex items-center justify-between text-xs font-mono text-slate-400">
-                <span>Execution Response (JSON-RPC Output):</span>
+                <span>Server Reply (tools/call result):</span>
                 {outputJson && (
                   <button
                     onClick={handleCopyOutput}
@@ -236,7 +252,7 @@ export const McpInspectorModal: React.FC<McpInspectorModalProps> = ({
                   <pre className="text-emerald-400/90 whitespace-pre-wrap">{outputJson}</pre>
                 ) : (
                   <span className="text-slate-600 italic">
-                    Click &quot;Run Tool Call&quot; to execute this MCP tool and inspect live JSON-RPC data...
+                    Click &quot;Run Tool Call&quot; to call this tool on the MCP server and see its reply...
                   </span>
                 )}
               </div>

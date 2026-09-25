@@ -98,9 +98,11 @@ export const ItineraryStudio: React.FC<ItineraryStudioProps> = ({
 
       const itineraryId = createRes.itinerary_id;
 
-      // Poll status
-      await new Promise(r => setTimeout(r, 450));
-      const statusRes = await McpClientService.getItineraryStatus(itineraryId);
+      // Poll status only when the itinerary did not come back directly
+      // (on Vercel the next request may reach an instance that never saw this job)
+      if (!createRes.itinerary) {
+        await McpClientService.getItineraryStatus(itineraryId);
+      }
 
       setGenerationProgress(80);
       setGenerationStatusText('Retrieving complete itinerary via get_itinerary...');
@@ -132,7 +134,7 @@ export const ItineraryStudio: React.FC<ItineraryStudioProps> = ({
 
     try {
       setIsModifying(true);
-      const modRes = await McpClientService.modifyItinerary(currentItinerary.id, text);
+      const modRes = await McpClientService.modifyItinerary(currentItinerary, text);
       if (modRes.itinerary) {
         setCurrentItinerary(modRes.itinerary);
         setSavedSuccessMsg(`Itinerary updated: "${text}"`);

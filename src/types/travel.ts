@@ -176,15 +176,20 @@ export interface SavedTripSummary {
 
 export interface McpToolMeta {
   name: string;
+  title?: string;
   description: string;
+  inputSchema?: Record<string, any>;
+  annotations?: Record<string, boolean>;
 }
 
 export interface ServerStatus {
   status: string;
   server: string;
+  title: string;
   version: string;
+  mcpPath: string;
   toolsCount: number;
   hasPlantripKey: boolean;
-  protocol: string;
-  uptime: number;
+  hasGeminiKey: boolean;
+  dataNotice: string;
 }

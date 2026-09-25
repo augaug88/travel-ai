@@ -14,9 +14,8 @@ async function startServer() {
   const port = process.env.PORT || 3000;
   const isProd = process.env.NODE_ENV === 'production';
 
-  app.use(express.json());
-
-  // Mount API endpoints
+  // API routes (incl. the MCP server at /api/mcp) parse their own JSON bodies.
+  // Mounted before Vite and the SPA catch-all so /api is never served as HTML.
   app.use('/api', apiRouter);
 
   if (!isProd) {

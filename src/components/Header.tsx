@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { ServerStatus } from '../types/travel.ts';
 import { useTheme } from '../context/ThemeContext.tsx';
+import { useMcpStatus } from '../services/mcpClient.ts';
 
 interface HeaderProps {
   activeTab: 'itinerary' | 'packing' | 'budget' | 'weather' | 'tours' | 'expert' | 'trips';
@@ -35,6 +36,11 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenChatDrawer
 }) => {
   const { theme, toggleTheme } = useTheme();
+  const mcp = useMcpStatus();
+  const toolsLabel = serverStatus ? ` (${serverStatus.toolsCount})` : '';
+  const latencyLabel = mcp.state === 'online' && mcp.latencyMs !== null ? `${mcp.latencyMs} ms` : '--';
+  const dotClass =
+    mcp.state === 'online' ? 'bg-emerald-400' : mcp.state === 'offline' ? 'bg-rose-500' : 'bg-slate-400';
 
   const tabs = [
     { id: 'itinerary' as const, label: 'Itinerary Planner', icon: Compass },
@@ -110,12 +116,15 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onOpenMcpInspector}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 dark:bg-slate-800 text-slate-100 hover:bg-slate-800 dark:hover:bg-slate-700 transition-all shadow-xs cursor-pointer border border-slate-800 dark:border-slate-700"
-              title="Inspect Model Context Protocol server tools"
+              title={`MCP server ${mcp.state}${mcp.lastError ? `: ${mcp.lastError}` : ''}`}
             >
               <Terminal className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden sm:inline">MCP Tools (14)</span>
-              <span className="sm:hidden">MCP (14)</span>
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="hidden sm:inline">MCP Tools{toolsLabel}</span>
+              <span className="sm:hidden">MCP{toolsLabel}</span>
+              <span className="hidden md:inline font-mono text-[10px] text-slate-400">
+                {mcp.state === 'unknown' ? 'not called yet' : mcp.state} · {latencyLabel}
+              </span>
+              <span className={`w-2 h-2 rounded-full ${dotClass}`} aria-label={`MCP server ${mcp.state}`}></span>
             </button>
           </div>
         </div>

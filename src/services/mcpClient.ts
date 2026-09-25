@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react';
 import {
   Itinerary,
   PackingListResponse,
@@ -14,75 +15,225 @@ import {
 
 const LOCAL_STORAGE_TRIPS_KEY = 'plantrip_saved_trips_v1';
 
-export class McpClientService {
-  /**
-   * Fetch server status & MCP connection
-   */
-  static async getStatus(): Promise<ServerStatus> {
-    try {
-      const res = await fetch('/api/status');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
-    } catch {
-      return {
-        status: 'online',
-        server: 'plantrip-mcp-server',
-        version: '1.0.0',
-        toolsCount: 14,
-        hasPlantripKey: false,
-        protocol: 'model-context-protocol/1.0',
-        uptime: 0
-      };
-    }
+// ================= LOW-LEVEL MCP CLIENT (Streamable HTTP, /api/mcp) =================
+
+const MCP_ENDPOINT = '/api/mcp';
+const CLIENT_PROTOCOL_VERSION = '2025-11-25';
+const REQUEST_TIMEOUT_MS = 15_000;
+
+export class McpNotFoundError extends Error {
+  constructor(message: string, public payload?: unknown) {
+    super(message);
+    this.name = 'McpNotFoundError';
+  }
+}
+
+export class McpToolError extends Error {
+  constructor(message: string, public payload?: unknown) {
+    super(message);
+    this.name = 'McpToolError';
+  }
+}
+
+class McpTransportError extends Error {
+  constructor(message: string, public offline: boolean) {
+    super(message);
+    this.name = 'McpTransportError';
+  }
+}
+
+export interface McpCallResult<T = any> {
+  data: T;
+  source: string;
+  rawPayload: unknown;
+  latency: number;
+}
+
+// ---- Status store, read by useMcpStatus() ----
+export interface McpStatusSnapshot {
+  state: 'unknown' | 'online' | 'offline';
+  latencyMs: number | null;
+  lastSource: string | null;
+  lastError: string | null;
+}
+
+let statusSnapshot: McpStatusSnapshot = { state: 'unknown', latencyMs: null, lastSource: null, lastError: null };
+const statusListeners = new Set<() => void>();
+
+function setStatus(patch: Partial<McpStatusSnapshot>) {
+  statusSnapshot = { ...statusSnapshot, ...patch };
+  statusListeners.forEach((l) => l());
+}
+
+export function useMcpStatus(): McpStatusSnapshot {
+  return useSyncExternalStore(
+    (listener) => {
+      statusListeners.add(listener);
+      return () => statusListeners.delete(listener);
+    },
+    () => statusSnapshot,
+    () => statusSnapshot
+  );
+}
+
+// ---- JSON-RPC over HTTP ----
+let nextId = 1;
+let negotiatedVersion: string | null = null;
+let initPromise: Promise<void> | null = null;
+
+async function postRpc(message: Record<string, unknown>): Promise<any> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json, text/event-stream'
+  };
+  if (negotiatedVersion) headers['MCP-Protocol-Version'] = negotiatedVersion;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(MCP_ENDPOINT, { method: 'POST', headers, body: JSON.stringify(message), signal: controller.signal });
+  } catch (err: any) {
+    throw new McpTransportError(
+      err?.name === 'AbortError' ? 'The MCP server did not answer within 15 seconds.' : 'Could not reach the MCP server.',
+      true
+    );
+  } finally {
+    clearTimeout(timer);
   }
 
-  /**
-   * Fetch list of registered MCP tools
-   */
-  static async getTools(): Promise<McpToolMeta[]> {
-    try {
-      const res = await fetch('/api/mcp/tools');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      return data.tools || [];
-    } catch {
-      return [
-        { name: 'create_itinerary', description: 'Create a new travel itinerary' },
-        { name: 'get_itinerary_status', description: 'Poll generation status' },
-        { name: 'get_itinerary', description: 'Retrieve complete itinerary' },
-        { name: 'modify_itinerary', description: 'Modify with natural language' },
-        { name: 'list_user_trips', description: 'List saved trips' },
-        { name: 'save_itinerary', description: "Save to user's trips" },
-        { name: 'delete_trip', description: 'Remove from saved trips' },
-        { name: 'generate_packing_list', description: 'AI packing list' },
-        { name: 'ask_travel_expert', description: 'Travel Q&A' },
-        { name: 'get_weather_insights', description: 'Weather/climate info' },
-        { name: 'estimate_trip_cost', description: 'Budget breakdown' },
-        { name: 'search_guides', description: 'Search travel guides' },
-        { name: 'get_tour_availability', description: 'Check tour dates' },
-        { name: 'submit_tour_inquiry', description: 'Tour booking inquiry' }
-      ];
+  if (res.status === 202) return null; // notification accepted
+  if (res.status >= 500) throw new McpTransportError(`The MCP server failed (HTTP ${res.status}).`, true);
+
+  const contentType = res.headers.get('content-type') || '';
+  let body: any = null;
+  try {
+    if (contentType.includes('text/event-stream')) {
+      const text = await res.text();
+      const dataLines = text.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim());
+      body = dataLines.length ? JSON.parse(dataLines[dataLines.length - 1]) : null;
+    } else {
+      body = await res.json();
     }
+  } catch {
+    throw new McpTransportError(`The MCP server sent an unreadable reply (HTTP ${res.status}).`, !res.ok);
   }
 
-  /**
-   * Execute raw MCP tool call by name
-   */
-  static async callTool<T = any>(tool: string, args: Record<string, any> = {}): Promise<T> {
-    const res = await fetch('/api/mcp/call', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tool, arguments: args })
+  if (body?.error) throw new McpTransportError(body.error.message || `MCP error ${body.error.code}`, false);
+  if (!res.ok) throw new McpTransportError(`The MCP server rejected the request (HTTP ${res.status}).`, false);
+  return body?.result;
+}
+
+async function ensureInitialized(): Promise<void> {
+  if (!initPromise) {
+    initPromise = (async () => {
+      const result = await postRpc({
+        jsonrpc: '2.0',
+        id: nextId++,
+        method: 'initialize',
+        params: {
+          protocolVersion: CLIENT_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: { name: 'plantrip-web', version: '2.0.0' }
+        }
+      });
+      negotiatedVersion = result?.protocolVersion || CLIENT_PROTOCOL_VERSION;
+      await postRpc({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    })().catch((err) => {
+      initPromise = null;
+      negotiatedVersion = null;
+      throw err;
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-      throw new Error(err.error || `Failed to execute ${tool}`);
+  }
+  return initPromise;
+}
+
+async function request(method: string, params: Record<string, unknown>): Promise<{ result: any; latency: number }> {
+  const started = performance.now();
+  try {
+    await ensureInitialized();
+    const result = await postRpc({ jsonrpc: '2.0', id: nextId++, method, params });
+    const latency = Math.round(performance.now() - started);
+    setStatus({ state: 'online', latencyMs: latency, lastError: null });
+    return { result, latency };
+  } catch (err: any) {
+    if (err instanceof McpTransportError && err.offline) {
+      initPromise = null;
+      setStatus({ state: 'offline', latencyMs: null, lastError: err.message });
+    } else {
+      setStatus({ state: 'online', latencyMs: Math.round(performance.now() - started), lastError: err?.message ?? null });
     }
-    const data = await res.json();
-    return data.result as T;
+    throw err;
+  }
+}
+
+/** Call an MCP tool on this app's server. Throws McpNotFoundError / McpToolError on tool errors. */
+export async function callMcp<T = any>(tool: string, args: Record<string, any> = {}): Promise<McpCallResult<T>> {
+  const { result, latency } = await request('tools/call', { name: tool, arguments: args });
+  const payload = result?.structuredContent ?? parseTextPayload(result);
+
+  if (result?.isError) {
+    const message = payload?.message || firstText(result) || `${tool} failed.`;
+    if (payload?.found === false) throw new McpNotFoundError(message, payload);
+    throw new McpToolError(message, result);
   }
 
-  // ================= 14 SPECIALIZED TOOL WRAPPERS =================
+  const source = payload?.source || 'Unknown source';
+  setStatus({ lastSource: source });
+  return { data: payload?.result as T, source, rawPayload: result, latency };
+}
+
+/** List the tools the server actually registers. */
+export async function listMcpTools(): Promise<{ tools: McpToolMeta[]; rawPayload: unknown }> {
+  const { result } = await request('tools/list', {});
+  return { tools: result?.tools || [], rawPayload: result };
+}
+
+function firstText(result: any): string | undefined {
+  return result?.content?.find((c: any) => c.type === 'text')?.text;
+}
+
+function parseTextPayload(result: any): any {
+  const texts = (result?.content || []).filter((c: any) => c.type === 'text').map((c: any) => c.text);
+  for (let i = texts.length - 1; i >= 0; i--) {
+    try {
+      return JSON.parse(texts[i]);
+    } catch {
+      /* not JSON */
+    }
+  }
+  return null;
+}
+
+/** A sentence suitable for showing on screen. */
+export function describeMcpError(err: unknown): string {
+  if (err instanceof McpNotFoundError) return err.message;
+  if (err instanceof McpTransportError) return err.offline ? `${err.message} The MCP server is offline.` : err.message;
+  if (err instanceof McpToolError) return `The tool reported an error: ${err.message}`;
+  return (err as any)?.message || 'Something went wrong while calling the MCP server.';
+}
+
+// ================= TOOL WRAPPERS USED BY THE SCREENS =================
+
+async function tool<T>(name: string, args: Record<string, any> = {}): Promise<T> {
+  return (await callMcp<T>(name, args)).data;
+}
+
+export class McpClientService {
+  /** Server status from /api/status (throws when unreachable). */
+  static async getStatus(): Promise<ServerStatus> {
+    const res = await fetch('/api/status', { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    if (!res.ok) throw new Error(`Status check failed (HTTP ${res.status})`);
+    return res.json();
+  }
+
+  static async getTools(): Promise<McpToolMeta[]> {
+    return (await listMcpTools()).tools;
+  }
+
+  static async callTool<T = any>(name: string, args: Record<string, any> = {}): Promise<T> {
+    return tool<T>(name, args);
+  }
 
   // 1. create_itinerary
   static async createItinerary(params: {
@@ -95,7 +246,7 @@ export class McpClientService {
     interests?: string[];
     notes?: string;
   }): Promise<{ status: string; itinerary_id: string; message: string; itinerary?: Itinerary }> {
-    return this.callTool('create_itinerary', params);
+    return tool('create_itinerary', params);
   }
 
   // 2. get_itinerary_status
@@ -105,60 +256,46 @@ export class McpClientService {
     progress: number;
     message: string;
   }> {
-    return this.callTool('get_itinerary_status', { itinerary_id });
+    return tool('get_itinerary_status', { itinerary_id });
   }
 
-  // 3. get_itinerary
+  // 3. get_itinerary (throws McpNotFoundError when the server does not hold it)
   static async getItinerary(itinerary_id: string): Promise<{
     itinerary: Itinerary | null;
     found: boolean;
     message: string;
   }> {
-    return this.callTool('get_itinerary', { itinerary_id });
+    return tool('get_itinerary', { itinerary_id });
   }
 
-  // 4. modify_itinerary
-  static async modifyItinerary(itinerary_id: string, modification_request: string): Promise<{
+  // 4. modify_itinerary — sends the itinerary too, since serverless instances do not share memory
+  static async modifyItinerary(itinerary: Itinerary, modification_request: string): Promise<{
     success: boolean;
     itinerary: Itinerary;
     message: string;
   }> {
-    return this.callTool('modify_itinerary', { itinerary_id, modification_request });
+    return tool('modify_itinerary', { itinerary_id: itinerary.id, modification_request, itinerary });
   }
 
-  // 5. list_user_trips
+  // 5. list_user_trips, merged with trips this browser saved
   static async listUserTrips(): Promise<SavedTripSummary[]> {
-    try {
-      const result = await this.callTool<{ trips: SavedTripSummary[] }>('list_user_trips', {});
-      const serverTrips = result?.trips || [];
+    const result = await tool<{ trips: SavedTripSummary[] }>('list_user_trips', {});
+    const serverTrips = result?.trips || [];
 
-      // Merge with localStorage for persistent client experience without database
-      const localStr = localStorage.getItem(LOCAL_STORAGE_TRIPS_KEY);
-      if (localStr) {
-        try {
-          const localTrips: SavedTripSummary[] = JSON.parse(localStr);
-          const map = new Map<string, SavedTripSummary>();
-          serverTrips.forEach(t => map.set(t.id, t));
-          localTrips.forEach(t => map.set(t.id, t));
-          return Array.from(map.values());
-        } catch {
-          // ignore parsing error
-        }
-      }
-      return serverTrips;
-    } catch {
-      return [];
-    }
+    const localTrips = readLocalTrips();
+    const map = new Map<string, SavedTripSummary>();
+    serverTrips.forEach((t) => map.set(t.id, t));
+    localTrips.forEach((t) => map.set(t.id, t));
+    return Array.from(map.values());
   }
 
   // 6. save_itinerary
   static async saveItinerary(itinerary: Itinerary, title?: string): Promise<{ success: boolean; trip_id: string; message: string }> {
-    const result = await this.callTool('save_itinerary', { itinerary, title });
+    const result = await tool<{ success: boolean; trip_id: string; message: string }>('save_itinerary', { itinerary, title });
 
-    // Store summary in localStorage
     try {
-      const existing = await this.listUserTrips();
-      const updated = [
+      const existing = readLocalTrips();
+      const updated: SavedTripSummary[] = [
         {
           id: itinerary.id,
           title: title || itinerary.title,
@@ -176,32 +313,29 @@ export class McpClientService {
             : 'https://images.unsplash.com/photo-1529260830199-42c24126f198?auto=format&fit=crop&w=1200&q=80',
           createdAt: new Date().toISOString()
         },
-        ...existing.filter(t => t.id !== itinerary.id)
+        ...existing.filter((t) => t.id !== itinerary.id)
       ];
       localStorage.setItem(LOCAL_STORAGE_TRIPS_KEY, JSON.stringify(updated));
       localStorage.setItem(`plantrip_full_${itinerary.id}`, JSON.stringify(itinerary));
     } catch {
-      // ignore
+      // storage unavailable (private window); the server copy still exists
     }
 
     return result;
   }
 
-  // 7. delete_trip
+  // 7. delete_trip — removes this browser's copy, then the server's
   static async deleteTrip(trip_id: string): Promise<{ success: boolean; message: string }> {
-    const result = await this.callTool('delete_trip', { trip_id });
+    const wasLocal = removeLocalTrip(trip_id);
     try {
-      const localStr = localStorage.getItem(LOCAL_STORAGE_TRIPS_KEY);
-      if (localStr) {
-        const localTrips: SavedTripSummary[] = JSON.parse(localStr);
-        const filtered = localTrips.filter(t => t.id !== trip_id);
-        localStorage.setItem(LOCAL_STORAGE_TRIPS_KEY, JSON.stringify(filtered));
-        localStorage.removeItem(`plantrip_full_${trip_id}`);
+      return await tool('delete_trip', { trip_id });
+    } catch (err) {
+      // A trip saved on another serverless instance only exists in this browser.
+      if (err instanceof McpNotFoundError && wasLocal) {
+        return { success: true, message: `Trip ${trip_id} removed from this browser.` };
       }
-    } catch {
-      // ignore
+      throw err;
     }
-    return result;
   }
 
   // 8. generate_packing_list
@@ -212,7 +346,7 @@ export class McpClientService {
     activities?: string[];
     travelers_type?: string;
   }): Promise<PackingListResponse> {
-    return this.callTool('generate_packing_list', params);
+    return tool('generate_packing_list', params);
   }
 
   // 9. ask_travel_expert
@@ -221,7 +355,7 @@ export class McpClientService {
     destination: string;
     travel_context?: string;
   }): Promise<ExpertAnswer> {
-    return this.callTool('ask_travel_expert', params);
+    return tool('ask_travel_expert', params);
   }
 
   // 10. get_weather_insights
@@ -229,7 +363,7 @@ export class McpClientService {
     destination: string;
     month?: string | number;
   }): Promise<WeatherInsights> {
-    return this.callTool('get_weather_insights', params);
+    return tool('get_weather_insights', params);
   }
 
   // 11. estimate_trip_cost
@@ -239,7 +373,7 @@ export class McpClientService {
     travel_style?: 'budget' | 'moderate' | 'luxury';
     travelers?: number;
   }): Promise<CostEstimate> {
-    return this.callTool('estimate_trip_cost', params);
+    return tool('estimate_trip_cost', params);
   }
 
   // 12. search_guides
@@ -248,7 +382,7 @@ export class McpClientService {
     destination?: string;
     category?: string;
   }): Promise<{ guides: TravelGuide[]; count: number }> {
-    return this.callTool('search_guides', params);
+    return tool('search_guides', params);
   }
 
   // 13. get_tour_availability
@@ -257,10 +391,10 @@ export class McpClientService {
     tour_type?: string;
     date?: string;
   }): Promise<{ tours: TourItem[]; destination: string }> {
-    return this.callTool('get_tour_availability', params);
+    return tool('get_tour_availability', params);
   }
 
-  // 14. submit_tour_inquiry
+  // 14. submit_tour_inquiry (demo only: nothing is booked or emailed)
   static async submitTourInquiry(params: {
     tour_id?: string;
     tour_title?: string;
@@ -271,10 +405,10 @@ export class McpClientService {
     travelers_count: number;
     special_requests?: string;
   }): Promise<TourInquiryResponse> {
-    return this.callTool('submit_tour_inquiry', params);
+    return tool('submit_tour_inquiry', params);
   }
 
-  // 15. askChatbot (queries MCP tools with conversational AI concierge)
+  // AI concierge (server picks an MCP tool, Gemini writes the reply)
   static async askChatbot(params: {
     message: string;
     destination?: string;
@@ -292,12 +426,34 @@ export class McpClientService {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params)
+      body: JSON.stringify(params),
+      signal: AbortSignal.timeout(30_000)
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
       throw new Error(err.error || 'Chatbot request failed');
     }
     return await res.json();
+  }
+}
+
+function readLocalTrips(): SavedTripSummary[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_TRIPS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function removeLocalTrip(trip_id: string): boolean {
+  try {
+    const trips = readLocalTrips();
+    const filtered = trips.filter((t) => t.id !== trip_id);
+    localStorage.setItem(LOCAL_STORAGE_TRIPS_KEY, JSON.stringify(filtered));
+    localStorage.removeItem(`plantrip_full_${trip_id}`);
+    return filtered.length !== trips.length;
+  } catch {
+    return false;
   }
 }
