@@ -56,7 +56,9 @@ export const CAP = {
     key: "flights",
     label: "flight search",
     candidates: [
-      { source: "kiwi", test: (n) => has(n, "search-flight", "search_flight", "searchflight") },
+      { source: "gordgus/ignav-flights", test: (n) => n.includes("ignav") && endsWith(n, "search_flights") },
+      { source: "kiwi", test: (n) => n.includes("kiwi") && has(n, "search-flight", "search_flight") },
+      { source: "flight-search", test: (n) => has(n, "search-flight", "search_flight", "searchflight") },
       { source: "kiwi", test: (n, d) => n.includes("flight") && (has(n, "search", "find") || d.includes("kiwi")) },
       { source: "mrabi/google-flights", test: (n) => n.includes("flight") },
     ],

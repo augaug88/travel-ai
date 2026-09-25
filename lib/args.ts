@@ -13,17 +13,37 @@ export interface ArgSpec {
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
+interface Prop {
+  type?: string | string[];
+  enum?: unknown[];
+  minimum?: number;
+  maximum?: number;
+  anyOf?: Prop[];
+}
 interface Schema {
-  properties?: Record<string, { type?: string | string[]; enum?: unknown[] }>;
+  properties?: Record<string, Prop>;
   required?: string[];
 }
 
-function coerce(value: unknown, type: string | string[] | undefined): unknown {
-  const t = Array.isArray(type) ? type[0] : type;
+function flatten(prop: Prop | undefined): Prop {
+  if (!prop) return {};
+  if (prop.anyOf) {
+    const inner = prop.anyOf.find((p) => p.type && p.type !== "null");
+    return { ...prop, ...(inner ?? {}) };
+  }
+  return prop;
+}
+
+function coerce(value: unknown, rawProp: Prop | undefined): unknown {
+  const prop = flatten(rawProp);
+  const t = Array.isArray(prop.type) ? prop.type[0] : prop.type;
   if (value === undefined || value === null) return value;
   if (t === "number" || t === "integer") {
-    const n = typeof value === "number" ? value : Number(value);
-    return Number.isFinite(n) ? n : value;
+    let n = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(n)) return value;
+    if (prop.maximum !== undefined) n = Math.min(n, prop.maximum);
+    if (prop.minimum !== undefined) n = Math.max(n, prop.minimum);
+    return t === "integer" ? Math.round(n) : n;
   }
   if (t === "string" && typeof value !== "string") return String(value);
   return value;
@@ -48,7 +68,7 @@ export function buildArgs(tool: ResolvedTool, specs: ArgSpec[]): Record<string, 
     const spec = specs.find((s) => s.aliases.some((a) => norm(a) === key));
     if (!spec) continue;
     if (spec.value === undefined || spec.value === null || spec.value === "") continue;
-    args[name] = coerce(spec.value, props[name]?.type);
+    args[name] = coerce(spec.value, props[name]);
   }
 
   const missing = (schema.required ?? []).filter((r) => args[r] === undefined);
