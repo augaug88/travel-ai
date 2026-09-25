@@ -33,6 +33,8 @@ export interface HotelOption {
   name?: string;
   address?: string;
   rating?: number;
+  reviews?: number;
+  /** Per-night price as returned by the provider. */
   price?: number;
   currency?: string;
   url?: string;
@@ -40,6 +42,7 @@ export interface HotelOption {
 }
 export interface HotelsResponse extends Sourced {
   city: string;
+  country?: string;
   checkin: string;
   checkout: string;
   nights: number;
@@ -82,12 +85,43 @@ export interface SgWeatherResponse extends Sourced {
   sources: Record<string, string>;
 }
 
+export interface DailyForecast {
+  date?: string;
+  weekday?: string;
+  min_temp?: number;
+  max_temp?: number;
+  precip_prob?: number;
+  precip_mm?: number;
+  humidity?: number;
+}
 export interface AbroadWeatherResponse extends Sourced {
   city: string;
+  resolved_name?: string;
   summary?: string;
   temperature?: number;
   temperature_unit?: string;
   condition?: string;
+  forecast?: DailyForecast[];
+  best_time_summary?: string;
+  attribution?: string;
+  place_url?: string;
+}
+
+export interface DestinationResponse extends Sourced {
+  city: string;
+  handle?: string;
+  name?: string;
+  country?: string;
+  airport_code?: string;
+  currency_code?: string;
+  currency_name?: string;
+  phone_code?: string;
+  safety_level?: number;
+  /** Markdown brief from the provider (safety, health, recent news). */
+  brief?: string;
+  brief_updated?: string;
+  taxi_apps?: string[];
+  place_url?: string;
 }
 
 export interface Attraction {

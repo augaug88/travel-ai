@@ -63,6 +63,7 @@ button:disabled { opacity: 0.6; cursor: default; }
 .table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .table .total td { font-weight: 700; }
 
+.brief { white-space: pre-wrap; font: inherit; font-size: 0.85rem; margin: 8px 0 0; }
 .raw { margin: 12px 0; font-size: 0.8rem; }
 .raw summary { cursor: pointer; color: var(--muted); }
 .raw pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 10px; overflow: auto; max-height: 360px; font-size: 0.75rem; }

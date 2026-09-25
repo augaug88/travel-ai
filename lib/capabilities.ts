@@ -38,6 +38,9 @@ export class MissingCapabilityError extends Error {
 }
 
 const has = (s: string, ...needles: string[]) => needles.some((n) => s.includes(n));
+/** Toolbox tools are named "<owner>-<server>_<tool>"; match on the tool part. */
+const tail = (n: string) => n.split("_").slice(1).join("_") || n;
+const endsWith = (n: string, ...tools: string[]) => tools.some((t) => n === t || n.endsWith(`_${t}`) || tail(n) === t);
 
 export const CAP = {
   flights: {
@@ -53,8 +56,10 @@ export const CAP = {
     key: "hotels",
     label: "hotel search",
     candidates: [
+      { source: "moodtrip/moodtrip-hotel-search", test: (n) => n.includes("moodtrip") && endsWith(n, "searchhotelswithrates") },
       { source: "google/hotels", test: (n, d) => n.includes("hotel") && (n.includes("google") || d.includes("google")) },
       { source: "google/hotels", test: (n, d) => n.includes("hotel") && has(n, "search", "find") && !d.includes("moodtrip") },
+      { source: "moodtrip/moodtrip-hotel-search", test: (n) => n.includes("moodtrip") && endsWith(n, "findhotels") },
       { source: "moodtrip/moodtrip-hotel-search", test: (n) => n.includes("hotel") },
     ],
   },
@@ -78,7 +83,9 @@ export const CAP = {
     key: "fx",
     label: "currency exchange rates",
     candidates: [
-      { source: "stockvibes07/exchange-mcp", test: (n) => has(n, "exchange", "convert", "currency") },
+      { source: "stockvibes07/exchange-mcp", test: (n) => n.includes("exchange-mcp") && endsWith(n, "convert") },
+      { source: "stockvibes07/exchange-mcp", test: (n) => n.includes("exchange-mcp") && endsWith(n, "get_rate") },
+      { source: "stockvibes07/exchange-mcp", test: (n) => has(n, "exchange", "convert", "currency") && !has(n, "xrocket", "crypto") },
       { source: "stockvibes07/exchange-mcp", test: (n, d) => n.includes("rate") && d.includes("currenc") },
     ],
   },
@@ -86,6 +93,7 @@ export const CAP = {
     key: "sg_weather_2h",
     label: "NEA 2-hour forecast",
     candidates: [
+      { source: "vdineshk/sg-weather-data-mcp", test: (n) => endsWith(n, "get_sg_weather_now") },
       { source: "vdineshk/sg-weather-data-mcp", test: (n) => has(n, "2h", "2-h", "2_h", "2hour", "two_hour", "twohour", "two-hour") },
       { source: "vdineshk/sg-weather-data-mcp", test: (n, d) => has(n, "forecast", "weather") && has(d, "2-hour", "2 hour", "two-hour", "nowcast") },
     ],
@@ -94,6 +102,7 @@ export const CAP = {
     key: "sg_weather_24h",
     label: "NEA 24-hour forecast",
     candidates: [
+      { source: "vdineshk/sg-weather-data-mcp", test: (n) => endsWith(n, "get_sg_forecast") },
       { source: "vdineshk/sg-weather-data-mcp", test: (n) => has(n, "24h", "24-h", "24_h", "24hour", "24-hour") },
       { source: "vdineshk/sg-weather-data-mcp", test: (n, d) => has(n, "forecast", "weather") && has(d, "24-hour", "24 hour") },
     ],
@@ -102,7 +111,7 @@ export const CAP = {
     key: "sg_rain",
     label: "NEA rainfall",
     candidates: [
-      { source: "vdineshk/sg-weather-data-mcp", test: (n) => has(n, "rain", "precip") },
+      { source: "vdineshk/sg-weather-data-mcp", test: (n) => has(n, "sg", "singapore", "nea") && has(n, "rain", "precip") },
     ],
   },
   sgWeatherAny: {
@@ -112,11 +121,22 @@ export const CAP = {
       { source: "vdineshk/sg-weather-data-mcp", test: (n, d) => has(n, "weather", "forecast") && has(n + " " + d, "singapore", "nea", "sg ") },
     ],
   },
+  resolveDestination: {
+    key: "resolve_destination",
+    label: "destination lookup (Sorted)",
+    candidates: [{ source: "sorted/travel-destinations", test: (n) => endsWith(n, "resolve_destination") }],
+  },
+  destinationInfo: {
+    key: "destination_info",
+    label: "destination facts (Sorted)",
+    candidates: [{ source: "sorted/travel-destinations", test: (n) => endsWith(n, "get_destination_info") }],
+  },
   abroadWeather: {
     key: "weather_abroad",
     label: "weather for a city abroad",
     candidates: [
-      { source: "isdaniel/mcp_weather_server", test: (n, d) => n.includes("weather") && !has(n + " " + d, "singapore", "nea", "2-hour", "24-hour", "rainfall") },
+      { source: "sorted/travel-destinations", test: (n) => endsWith(n, "get_destination_weather") },
+      { source: "isdaniel/mcp_weather_server", test: (n, d) => n.includes("weather") && !has(n + " " + d, "singapore", "nea", "2-hour", "24-hour", "rainfall", "sg_", "asean") },
       { source: "isdaniel/mcp_weather_server", test: (n, d) => has(n, "forecast", "temperature") && has(d, "city") && !has(d, "singapore") },
     ],
   },

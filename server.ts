@@ -11,6 +11,7 @@ import type { ApiHandler } from "./lib/http.js";
 import attractions from "./api/attractions.js";
 import changi from "./api/changi.js";
 import chat from "./api/chat.js";
+import destination from "./api/destination.js";
 import flights from "./api/flights.js";
 import fx from "./api/fx.js";
 import hotels from "./api/hotels.js";
@@ -25,6 +26,7 @@ const routes: Record<string, ApiHandler> = {
   "/api/weather/sg": weatherSg,
   "/api/weather/abroad": weatherAbroad,
   "/api/attractions": attractions,
+  "/api/destination": destination,
   "/api/chat": chat,
 };
 

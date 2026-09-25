@@ -1,15 +1,17 @@
 import { buildArgs } from "./args.js";
 import { CAP, MissingCapabilityError, resolveTool, tryResolveTool, type ResolvedTool } from "./capabilities.js";
 import { asUpstream, BadRequestError, nowIso, UpstreamError } from "./errors.js";
-import { findList, flattenText, pickNumber, pickString } from "./normalize.js";
+import { resolveDestinationHandle } from "./destination.js";
+import { findList, flattenText, pick, pickNumber, pickString } from "./normalize.js";
 import { callTool } from "./tools.js";
-import type { AbroadWeatherResponse, SgWeatherResponse } from "./types.js";
+import type { AbroadWeatherResponse, DailyForecast, SgWeatherResponse } from "./types.js";
 
 const SG_SOURCE = "vdineshk/sg-weather-data-mcp";
 
-async function callSg(tool: ResolvedTool, area?: string): Promise<unknown> {
+async function callSg(tool: ResolvedTool, area?: string, period?: string): Promise<unknown> {
   const args = buildArgs(tool, [
     { aliases: ["area", "location", "region", "town", "place", "name", "query"], value: area },
+    { aliases: ["period", "range", "horizon"], value: period },
   ]);
   return callTool(tool.name, args);
 }
@@ -36,7 +38,7 @@ export async function sgWeather(params: { area?: string }): Promise<SgWeatherRes
     tools = [{ key: "forecast_2h", tool: any }];
   }
 
-  const results = await Promise.allSettled(tools.map((t) => callSg(t.tool, params.area)));
+  const results = await Promise.allSettled(tools.map((t) => callSg(t.tool, params.area, t.key === "forecast_24h" ? "24h" : undefined)));
   const out: SgWeatherResponse = { area: params.area, sources: {}, source: SG_SOURCE, fetched_at: nowIso(), raw: {} };
   const rawAll: Record<string, unknown> = {};
   const failures: string[] = [];
@@ -60,16 +62,39 @@ export async function abroadWeather(params: { city: string }): Promise<AbroadWea
   if (!params.city.trim()) throw new BadRequestError("city is required");
   const tool = await resolveTool(CAP.abroadWeather);
   try {
+    const props = (tool.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
+    // Sorted-style tools take a destination handle: resolve the city first.
+    const resolved = "destination_handle" in props ? await resolveDestinationHandle(params.city) : null;
     const args = buildArgs(tool, [
+      { aliases: ["destination_handle", "handle"], value: resolved?.handle },
       { aliases: ["city", "city_name", "location", "place", "q", "query", "name"], value: params.city },
       { aliases: ["units", "unit"], value: "metric" },
     ]);
     const raw = await callTool(tool.name, args);
+    const days = findList(pick(raw, ["weather_forecast", "forecast", "daily"]) ?? null);
+    const forecast: DailyForecast[] = days.slice(0, 7).map((d) => ({
+      date: pickString(d, ["date", "day"]),
+      weekday: pickString(d, ["weekday"]),
+      min_temp: pickNumber(d, ["min_temp", "temp_min", "min"]),
+      max_temp: pickNumber(d, ["max_temp", "temp_max", "max"]),
+      precip_prob: pickNumber(d, ["precip_prob", "precipitation_probability", "pop"]),
+      precip_mm: pickNumber(d, ["precip_mm", "precipitation"]),
+      humidity: pickNumber(d, ["humidity"]),
+    }));
+    const today = forecast[0];
+    const summaryFromForecast = today
+      ? `${today.weekday ?? ""} ${today.date ?? ""}: ${today.min_temp ?? "?"}–${today.max_temp ?? "?"}°C, ${today.precip_prob ?? "?"}% chance of rain`.trim()
+      : undefined;
     return {
       city: params.city,
-      summary: typeof raw === "string" ? raw : undefined,
-      temperature: pickNumber(raw, ["temperature", "temp", "temp_c", "temperature_c", "current_temperature", "temperature_2m"]),
-      temperature_unit: pickString(raw, ["temperature_unit", "unit", "units"]) ?? (typeof raw === "object" && raw !== null ? "°C" : undefined),
+      resolved_name: resolved?.name ?? pickString(raw, ["name"]),
+      forecast: forecast.length ? forecast : undefined,
+      best_time_summary: pickString(raw, ["best_time_summary"]),
+      attribution: pickString(raw, ["weather_attribution", "attribution"]),
+      place_url: pickString(raw, ["place_url"]),
+      summary: typeof raw === "string" ? raw : summaryFromForecast,
+      temperature: pickNumber(raw, ["temperature", "temp", "temp_c", "temperature_c", "current_temperature", "temperature_2m"]) ?? today?.max_temp,
+      temperature_unit: pickString(raw, ["temperature_unit"]) ?? (typeof raw === "object" && raw !== null ? "°C" : undefined),
       condition: pickString(raw, ["condition", "description", "weather", "summary", "weather_description", "conditions", "text"]),
       source: tool.source,
       fetched_at: nowIso(),

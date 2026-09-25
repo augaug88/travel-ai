@@ -8,20 +8,24 @@ import { isoDate, money } from "../lib/format";
 
 export default function StayPage() {
   const [city, setCity] = useState("");
+  const [country, setCountry] = useState("");
   const [checkin, setCheckin] = useState(isoDate(30));
   const [checkout, setCheckout] = useState(isoDate(34));
   const { data, loading, error, touched, run } = useAsync<HotelsResponse>();
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    void run(() => apiGet<HotelsResponse>("/api/hotels", { city, checkin, checkout }));
+    void run(() => apiGet<HotelsResponse>("/api/hotels", { city, country, checkin, checkout }));
   };
 
   return (
     <section>
       <h2>Stay</h2>
       <form className="form" onSubmit={submit}>
-        <Field label="City" value={city} onChange={(e) => setCity(e.target.value)} placeholder="Tokyo" required />
+        <div className="row">
+          <Field label="City" value={city} onChange={(e) => setCity(e.target.value)} placeholder="Tokyo" required />
+          <Field label="Country (ISO-2)" value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} maxLength={2} placeholder="JP" required />
+        </div>
         <div className="row">
           <Field label="Check-in" type="date" value={checkin} onChange={(e) => setCheckin(e.target.value)} required />
           <Field label="Check-out" type="date" value={checkout} onChange={(e) => setCheckout(e.target.value)} required />
@@ -44,10 +48,11 @@ export default function StayPage() {
                 <li key={i} className="card">
                   <div className="card-head">
                     <strong>{h.name ?? "Hotel n/a"}</strong>
-                    <span className="price">{money(h.price, h.currency)}</span>
+                    <span className="price">{money(h.price, h.currency)}{h.price !== undefined ? <span className="muted"> /night</span> : null}</span>
                   </div>
                   <div className="muted">
                     {h.rating !== undefined ? `★ ${h.rating}` : ""}
+                    {h.reviews !== undefined ? ` (${h.reviews.toLocaleString("en-SG")} reviews)` : ""}
                     {h.address ? ` · ${h.address}` : ""}
                   </div>
                   {h.url && <a href={h.url} target="_blank" rel="noreferrer">View on provider</a>}

@@ -44,23 +44,63 @@ export function errorMessage(err: unknown): string {
   return sanitize(String(err));
 }
 
+/**
+ * Read-only guardrail. The toolbox exposes management tools (remove_server,
+ * execute) and some servers expose write tools. None of them may ever be
+ * listed to Gemini or called by a route.
+ */
+const DENIED_EXACT = new Set(["execute", "remove_server"]);
+const DENIED_PATTERN = /(^|[_-])(remove|delete|update|create|book|pay|purchase|send|cancel|write|post)([_-]|$)/i;
+
+export function isDeniedTool(name: string): boolean {
+  const short = name.split("_").slice(-1)[0] ?? name;
+  return DENIED_EXACT.has(name) || DENIED_EXACT.has(short) || DENIED_PATTERN.test(name);
+}
+
+/** Wrap a Client so listTools() hides denied tools and callTool() refuses them. */
+function readOnly(client: Client): Client {
+  return new Proxy(client, {
+    get(target, prop, receiver) {
+      if (prop === "listTools") {
+        return async (...args: Parameters<Client["listTools"]>) => {
+          const res = await target.listTools(...args);
+          return { ...res, tools: res.tools.filter((t) => !isDeniedTool(t.name)) };
+        };
+      }
+      if (prop === "callTool") {
+        return (...args: Parameters<Client["callTool"]>) => {
+          const name = args[0]?.name ?? "";
+          if (isDeniedTool(name)) return Promise.reject(new Error(`tool "${name}" is blocked: this app is read-only`));
+          return target.callTool(...args);
+        };
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 async function connect(): Promise<Client> {
   const url = toolboxUrl();
-  const client = new Client({ name: "sg-trip-planner", version: "0.1.0" });
+  const raw = new Client({ name: "sg-trip-planner", version: "0.1.0" });
+  const client = readOnly(raw);
   const transport = new StreamableHTTPClientTransport(url);
 
-  client.onerror = (err) => {
+  raw.onerror = (err) => {
     console.error(`[mcp] transport error: ${errorMessage(err)}`);
     resetMcpClient();
   };
-  client.onclose = () => {
+  raw.onclose = () => {
     resetMcpClient();
   };
 
-  await client.connect(transport);
-  const { tools } = await client.listTools();
+  await raw.connect(transport);
+  const { tools: all } = await raw.listTools();
+  const tools = all.filter((t) => !isDeniedTool(t.name));
+  const blocked = all.filter((t) => isDeniedTool(t.name)).map((t) => t.name);
   toolCache = tools;
-  console.log(`[mcp] connected; discovered ${tools.length} tools: ${tools.map((t) => t.name).join(", ")}`);
+  console.log(`[mcp] connected; discovered ${tools.length} usable tools: ${tools.map((t) => t.name).join(", ")}`);
+  if (blocked.length) console.log(`[mcp] blocked (read-only guardrail): ${blocked.join(", ")}`);
   return client;
 }
 

@@ -23,6 +23,7 @@ function cheapest<T extends { price?: number; currency?: string }>(items: T[]): 
 export default function PlanPage() {
   const [city, setCity] = useState("");
   const [airport, setAirport] = useState("");
+  const [country, setCountry] = useState("");
   const [currency, setCurrency] = useState("");
   const [depart, setDepart] = useState(isoDate(30));
   const [nights, setNights] = useState("4");
@@ -46,7 +47,7 @@ export default function PlanPage() {
     fx.reset();
     const [f, h] = await Promise.all([
       flights.run(() => apiGet<FlightsResponse>("/api/flights", { from: "SIN", to: airport, depart, return: ret })),
-      hotels.run(() => apiGet<HotelsResponse>("/api/hotels", { city, checkin: depart, checkout: ret })),
+      hotels.run(() => apiGet<HotelsResponse>("/api/hotels", { city, country, checkin: depart, checkout: ret })),
     ]);
     const total = computeLines(f, h).sgdTotal;
     if (currency && currency.toUpperCase() !== "SGD" && total > 0) {
@@ -65,7 +66,7 @@ export default function PlanPage() {
     const ch = h ? cheapest(h.options) : undefined;
     lines.push(
       ch
-        ? { label: `Hotel (cheapest result × ${n} nights)`, amount: (ch.price ?? 0) * n, currency: ch.currency, note: ch.name }
+        ? { label: `Hotel (cheapest per-night rate × ${n} nights)`, amount: (ch.price ?? 0) * n, currency: ch.currency, note: ch.name }
         : { label: "Hotel", note: h ? "no priced option returned" : "not fetched" },
     );
     lines.push({ label: `Food (S$${food}/day × ${days} d × ${pax})`, amount: (Number(food) || 0) * days * pax, currency: "SGD" });
@@ -90,9 +91,10 @@ export default function PlanPage() {
           <Field label="Airport (IATA)" value={airport} onChange={(e) => setAirport(e.target.value.toUpperCase())} maxLength={3} placeholder="NRT" required />
         </div>
         <div className="row">
+          <Field label="Country (ISO-2)" value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} maxLength={2} placeholder="JP" required />
           <Field label="Local currency" value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} maxLength={3} placeholder="JPY" />
-          <Field label="Depart" type="date" value={depart} onChange={(e) => setDepart(e.target.value)} required />
         </div>
+        <Field label="Depart" type="date" value={depart} onChange={(e) => setDepart(e.target.value)} required />
         <div className="row">
           <Field label="Nights" type="number" min={1} value={nights} onChange={(e) => setNights(e.target.value)} required />
           <Field label="Travellers" type="number" min={1} value={travellers} onChange={(e) => setTravellers(e.target.value)} required />

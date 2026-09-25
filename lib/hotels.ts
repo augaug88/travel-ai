@@ -7,7 +7,9 @@ import type { HotelOption, HotelsResponse } from "./types.js";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-export async function searchHotels(params: { city: string; checkin: string; checkout: string }): Promise<HotelsResponse> {
+export async function searchHotels(params: { city: string; country?: string; checkin: string; checkout: string }): Promise<HotelsResponse> {
+  const country = params.country?.toUpperCase();
+  if (country && !/^[A-Z]{2}$/.test(country)) throw new BadRequestError("country must be an ISO 3166-1 alpha-2 code, e.g. JP");
   if (!DATE.test(params.checkin) || !DATE.test(params.checkout)) throw new BadRequestError("checkin/checkout must be YYYY-MM-DD");
   const nights = Math.round((Date.parse(params.checkout) - Date.parse(params.checkin)) / 86_400_000);
   if (!(nights > 0)) throw new BadRequestError("checkout must be after checkin");
@@ -15,7 +17,9 @@ export async function searchHotels(params: { city: string; checkin: string; chec
   const tool = await resolveTool(CAP.hotels);
   try {
     const args = buildArgs(tool, [
-      { aliases: ["city", "location", "destination", "query", "q", "place", "where", "search_query", "searchQuery", "area", "city_name"], value: params.city },
+      { aliases: ["city", "cityName", "city_name", "location", "destination", "query", "q", "place", "where", "search_query", "searchQuery", "area"], value: params.city },
+      { aliases: ["country", "countryCode", "country_code"], value: country },
+      { aliases: ["occupancies", "rooms"], value: [{ adults: 2 }] },
       { aliases: ["checkin", "check_in", "checkIn", "check_in_date", "checkInDate", "checkin_date", "arrival_date", "start_date", "startDate", "from_date"], value: params.checkin },
       { aliases: ["checkout", "check_out", "checkOut", "check_out_date", "checkOutDate", "checkout_date", "departure_date", "end_date", "endDate", "to_date"], value: params.checkout },
       { aliases: ["currency", "curr"], value: "SGD" },
@@ -24,7 +28,7 @@ export async function searchHotels(params: { city: string; checkin: string; chec
     ]);
     const raw = await callTool(tool.name, args);
     const options = findList(raw).slice(0, 20).map(normalizeHotel);
-    return { city: params.city, checkin: params.checkin, checkout: params.checkout, nights, options, source: tool.source, fetched_at: nowIso(), raw };
+    return { city: params.city, country, checkin: params.checkin, checkout: params.checkout, nights, options, source: tool.source, fetched_at: nowIso(), raw };
   } catch (err) {
     throw asUpstream(tool.source, err);
   }
@@ -36,9 +40,10 @@ function normalizeHotel(item: Record<string, unknown>): HotelOption {
     name: pickString(item, ["name", "hotel_name", "hotelName", "title", "property_name"]),
     address: pickString(item, ["address", "location", "neighborhood", "neighbourhood", "area", "vicinity"]),
     rating: pickNumber(item, ["rating", "overall_rating", "review_score", "score", "stars", "hotel_class"]),
+    reviews: pickNumber(item, ["reviewCount", "review_count", "reviews", "num_reviews"]),
     price: price.amount,
     currency: price.currency,
-    url: pickString(item, ["url", "link", "booking_url", "website", "serpapi_property_details_link"]),
+    url: pickString(item, ["bookingUrl", "booking_url", "url", "link", "website", "galleryUrl"]),
     raw: item,
   };
 }

@@ -59,7 +59,23 @@ export default function WeatherPage() {
               {abroad.data.temperature !== undefined ? `${abroad.data.temperature}${abroad.data.temperature_unit ?? ""}` : "—"}
             </div>
             <div className="muted">{abroad.data.condition ?? abroad.data.summary ?? "See raw output"}</div>
+            {abroad.data.resolved_name && <div className="muted">Resolved to {abroad.data.resolved_name}</div>}
           </div>
+          {abroad.data.forecast && (
+            <table className="table">
+              <tbody>
+                {abroad.data.forecast.map((d, i) => (
+                  <tr key={i}>
+                    <td>{d.weekday ?? ""} {d.date ?? ""}</td>
+                    <td className="num">{d.min_temp ?? "?"}–{d.max_temp ?? "?"}°C</td>
+                    <td className="num">{d.precip_prob !== undefined ? `${d.precip_prob}% rain` : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {abroad.data.best_time_summary && <p className="muted">{abroad.data.best_time_summary}</p>}
+          {abroad.data.attribution && <p className="muted">{abroad.data.attribution}{abroad.data.place_url ? <> · <a href={abroad.data.place_url} target="_blank" rel="noreferrer">full page</a></> : null}</p>}
           <RawView data={abroad.data.raw} />
         </>
       )}
